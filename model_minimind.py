@@ -34,6 +34,9 @@ class MiniMindConfig(PretrainedConfig):
             n_routed_experts: int = 4,
             n_shared_experts: int = 1,
             scoring_func: str = 'softmax',
+            ####################################################
+            # MoE 辅助损失的权重系数不同
+            ####################################################
             aux_loss_alpha: float = 0.01,
             seq_aux: bool = True,
             norm_topk_prob: bool = True,
@@ -55,6 +58,11 @@ class MiniMindConfig(PretrainedConfig):
         self.rope_theta = rope_theta
         self.inference_rope_scaling = inference_rope_scaling
         # 外推长度 = factor * original_max_position_embeddings = 32768
+
+        ####################################################
+        # minimind: beta_fast = 4, factor = 4, 不含attention_factor
+        # 外推倍数更大（16倍 vs 4倍），且包含注意力缩放因子。
+        ####################################################
         self.rope_scaling = {
             "beta_fast": 32,
             "beta_slow": 1,
@@ -105,7 +113,29 @@ class RMSNorm(torch.nn.Module):
     def forward(self, x):
         return self.weight * self._norm(x.float()).type_as(x)
 
+####################################################
+# def precompute_freqs_cis(dim: int, end: int = int(32 * 1024), rope_base: float = 1e6,
+#                          rope_scaling: Optional[dict] = None):
+#     freqs = 1.0 / (rope_base ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
+#     if rope_scaling is not None:
+#         orig_max, factor, beta_fast, beta_slow = (
+#             rope_scaling.get("original_max_position_embeddings", 2048), rope_scaling.get("factor", 4),
+#             rope_scaling.get("beta_fast", 4.0), rope_scaling.get("beta_slow", 1.0)
+#         )
+#         if end / orig_max > 1.0:
+#             corr_dim = next((i for i in range(dim // 2) if 2 * math.pi / freqs[i] > orig_max), dim // 2)
+#             power = torch.arange(0, dim // 2, device=freqs.device).float() / max(dim // 2 - 1, 1)
+#             beta = beta_slow + (beta_fast - beta_slow) * power
+#             # λ = (β·α - β + 1)/(β·α) YaRN标准公式
+#             scale = torch.where(torch.arange(dim // 2, device=freqs.device) < corr_dim, (beta * factor - beta + 1) / (beta * factor), 1.0 / factor)
+#             freqs = freqs * scale
 
+#     t = torch.arange(end, device=freqs.device)
+#     freqs = torch.outer(t, freqs).float()
+#     freqs_cos = torch.cat([torch.cos(freqs), torch.cos(freqs)], dim=-1)
+#     freqs_sin = torch.cat([torch.sin(freqs), torch.sin(freqs)], dim=-1)
+#     return freqs_cos, freqs_sin
+####################################################
 def precompute_freqs_cis(dim: int, end: int = int(32 * 1024), rope_base: float = 1e6,
                          rope_scaling: Optional[dict] = None):
     freqs, attn_factor = 1.0 / (rope_base ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)), 1.0
@@ -429,6 +459,40 @@ class MiniMindModel(nn.Module):
 
         return hidden_states, presents, aux_loss
 
+####################################################
+# class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
+#     config_class = MiniMindConfig
+
+#     def __init__(self, config: MiniMindConfig = None):
+#         self.config = config or MiniMindConfig()
+#         super().__init__(self.config)
+#         self.model = MiniMindModel(self.config)
+#         self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False)
+#         self.model.embed_tokens.weight = self.lm_head.weight
+#         self.OUT = CausalLMOutputWithPast()
+
+#     def forward(self,
+#                 input_ids: Optional[torch.Tensor] = None,
+#                 attention_mask: Optional[torch.Tensor] = None,
+#                 past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+#                 use_cache: bool = False,
+#                 logits_to_keep: Union[int, torch.Tensor] = 0,
+#                 **args):
+#         h, past_kvs, aux_loss = self.model(
+#             input_ids=input_ids,
+#             attention_mask=attention_mask,
+#             past_key_values=past_key_values,
+#             use_cache=use_cache,
+#             **args
+#         )
+#         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+#         logits = self.lm_head(h[:, slice_indices, :])
+#         self.OUT.__setitem__('last_hidden_state', h)
+#         self.OUT.__setitem__('logits', logits)
+#         self.OUT.__setitem__('aux_loss', aux_loss)
+#         self.OUT.__setitem__('past_key_values', past_kvs)
+#         return self.OUT
+####################################################
 
 class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
     config_class = MiniMindConfig
