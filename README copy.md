@@ -1,5 +1,13 @@
-# MiniMind中的一些细节
+# 补充MiniMind中的一些细节
 ## Yarn
+### ROPE
+https://zhuanlan.zhihu.com/p/667864459
+
+rotate_half()：
+![Alt text](image.png)
+![Alt text](image-1.png)
+
+
 
 ## MOE
 
