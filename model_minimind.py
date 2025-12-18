@@ -35,7 +35,9 @@ class MiniMindConfig(PretrainedConfig):
             n_shared_experts: int = 1,
             scoring_func: str = 'softmax',
             ####################################################
-            # MoE 辅助损失的权重系数不同
+            # MoE 辅助损失的权重系数不同，minimind是0.1
+            # 0.01在处理负载均衡时比较温和，在 VLM 中，MoE 的专家们会自动发生功能分化。有些专家可能自然而然地擅长处理“视觉信号”。有些专家擅长处理“语言逻辑”。
+            # 纯文本需要“强管教”，对于纯文本模型，很多专家（Experts）的能力可能是重叠的。比如专家A和专家B都能处理“主谓宾”结构。路由器很容易偷懒，发现专家A好用，就死盯着专家A用。
             ####################################################
             aux_loss_alpha: float = 0.01,
             seq_aux: bool = True,
@@ -62,13 +64,17 @@ class MiniMindConfig(PretrainedConfig):
         ####################################################
         # minimind: beta_fast = 4, factor = 4, 不含attention_factor
         # 外推倍数更大（16倍 vs 4倍），且包含注意力缩放因子。
+        # 1token = 1个汉字/0.7个英文。一张图片，196个token，
+        # 4倍外推 (8192 长度)：大概能存 1万字 的小说章节或论文。这对普通聊天完全够用了。
+        # 10 张图 = $1960$ Token。再加上原本的文字对话、System Prompt、思维链（CoT）。16 倍（32k上下文）可以让你轻松处理视频理解（比如输入 100 帧关键帧）或长篇图文故事
         ####################################################
         self.rope_scaling = {
-            "beta_fast": 32,
+            "beta_fast": 32, # 阈值，旋转频率比较高的维度，尽量保持原样，不要去插值
             "beta_slow": 1,
-            "factor": 16,
+            "factor": 16, # 外推倍数
             "original_max_position_embeddings": 2048,
-            "attention_factor": 1.0,
+            "attention_factor": 1.0, # 熵修正（Entropy Scale），当你把上下文拉得很长（比如 16 倍）时，注意力矩阵会变得很“平”，模型会觉得“每个词都有点像，不知道该看谁”，导致注意力分散（熵增）
+            # Attention Factor 的作用：它用来人为地把注意力分数的差异放大（乘一个系数），让模型能更敏锐地抓住重点
             "type": "yarn"
         } if self.inference_rope_scaling else None
         self.flash_attn = flash_attn
